@@ -3,27 +3,40 @@ import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 import { existsSync } from "fs";
 
+const MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024; // 25 MB
+const ALLOWED_EXTENSIONS = ["pdf"];
+const ALLOWED_MIME_TYPES = ["application/pdf"];
+
 export async function POST(request: Request) {
   try {
     const formData = await request.formData();
     const file = formData.get("file") as File | null;
-    const title = formData.get("title") as string | null;
-    const type = formData.get("type") as string | null;
-    const semester = formData.get("semester") as string | null;
-    const subject = formData.get("subject") as string | null;
-    const unit = formData.get("unit") as string | null;
+    const title = (formData.get("title") as string | null)?.trim();
+    const type = (formData.get("type") as string | null)?.trim();
+    const semester = (formData.get("semester") as string | null)?.trim();
+    const subject = (formData.get("subject") as string | null)?.trim();
+    const unit = (formData.get("unit") as string | null)?.trim();
 
     if (!file || !title || !type || !semester || !subject || !unit) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
-    // Diagnostic console logs for tracking
-    console.log(`[Upload API] Incoming resource:
-      - Title: ${title}
-      - Type: ${type}
-      - Path: ${semester}/${subject}/unit-${unit}
-      - File: ${file.name} (${(file.size / 1024).toFixed(2)} KB)
-    `);
+    // Security: Validate file size
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      return NextResponse.json(
+        { error: "File exceeds the 25MB maximum size limit." },
+        { status: 400 }
+      );
+    }
+
+    // Security: Validate file extension & MIME type
+    const fileExtension = file.name.split(".").pop()?.toLowerCase() || "";
+    if (!ALLOWED_EXTENSIONS.includes(fileExtension) || !ALLOWED_MIME_TYPES.includes(file.type)) {
+      return NextResponse.json(
+        { error: "Only valid PDF files (.pdf) are permitted." },
+        { status: 400 }
+      );
+    }
 
     // Define local upload path: /public/uploads/
     const uploadDir = join(process.cwd(), "public", "uploads");
@@ -33,9 +46,13 @@ export async function POST(request: Request) {
       await mkdir(uploadDir, { recursive: true });
     }
 
-    // Format safe name for file
-    const fileExtension = file.name.split(".").pop();
-    const safeFileName = `${Date.now()}-${title.toLowerCase().replace(/[^a-z0-9]/g, "-")}.${fileExtension}`;
+    // Security: Sanitize filename to prevent directory traversal
+    const cleanTitle = title
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]/g, "-")
+      .replace(/-+/g, "-")
+      .slice(0, 80);
+    const safeFileName = `${Date.now()}-${cleanTitle}.pdf`;
     const filePath = join(uploadDir, safeFileName);
 
     // Save file buffer
@@ -45,10 +62,9 @@ export async function POST(request: Request) {
 
     const fileUrl = `/uploads/${safeFileName}`;
 
-    // Mock response details
     return NextResponse.json({
       success: true,
-      message: "Resource uploaded and stored successfully.",
+      message: "Resource uploaded successfully. Awaiting moderator review.",
       resource: {
         title,
         type,
@@ -62,24 +78,9 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("Upload API Error:", error);
     
-    // Safe fallback for serverless sandbox environment: return simulated link
-    return NextResponse.json({
-      success: true,
-      message: "Resource uploaded successfully (Simulated mode).",
-      resource: {
-        title: "Database Revision Notes (Sample)",
-        type: "NOTES_PDF",
-        fileUrl: "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
-        fileSizeMb: 0.12,
-        semester: "sem-3",
-        subject: "data-structures-algorithms",
-        unit: "1",
-      },
-    });
+    return NextResponse.json(
+      { error: "Internal Server Error during upload processing." },
+      { status: 500 }
+    );
   }
 }
-export const config = {
-  api: {
-    bodyParser: false, // Disables standard body parser to allow form data stream
-  },
-};

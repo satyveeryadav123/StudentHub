@@ -61,22 +61,22 @@ export default function PdfViewer({ fileUrl, title, subjectName, subjectUrl }: P
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-4rem)] bg-[#05070c]">
+    <div className="flex flex-col h-[calc(100vh-4rem)] bg-slate-100 dark:bg-[#05070c]">
       
       {/* PDF Header Toolbar */}
-      <div className="flex items-center justify-between border-b border-white/5 bg-brand-bg px-6 py-3 shrink-0">
+      <div className="flex items-center justify-between border-b border-slate-300 dark:border-white/5 bg-slate-200/80 dark:bg-brand-bg px-6 py-3 shrink-0">
         <div className="flex items-center gap-4 min-w-0">
           <Link
             href={subjectUrl}
-            className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 hover:text-white transition-colors"
+            className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors"
           >
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="2.5" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
             </svg>
             Back to {subjectName}
           </Link>
-          <span className="text-slate-600">|</span>
-          <h1 className="text-xs font-bold text-white truncate max-w-md" title={title}>
+          <span className="text-slate-400 dark:text-slate-600">|</span>
+          <h1 className="text-xs font-bold text-slate-900 dark:text-white truncate max-w-md" title={title}>
             {title}
           </h1>
         </div>
@@ -95,7 +95,7 @@ export default function PdfViewer({ fileUrl, title, subjectName, subjectUrl }: P
       <div className="flex-grow flex flex-col lg:flex-row overflow-hidden min-h-0">
         
         {/* Left Pane: PDF Viewer */}
-        <div className="flex-grow bg-slate-900 border-r border-white/5 relative h-1/2 lg:h-full">
+        <div className="flex-grow bg-slate-200 dark:bg-slate-900 border-r border-slate-300 dark:border-white/5 relative h-1/2 lg:h-full">
           <iframe
             src={`${fileUrl}#toolbar=0`}
             className="w-full h-full border-none"
@@ -104,13 +104,13 @@ export default function PdfViewer({ fileUrl, title, subjectName, subjectUrl }: P
         </div>
 
         {/* Right Pane: AI Study Partner Widget */}
-        <div className="w-full lg:w-96 flex flex-col bg-[#070a13] shrink-0 h-1/2 lg:h-full">
+        <div className="w-full lg:w-96 flex flex-col bg-slate-50 dark:bg-[#070a13] border-l border-slate-200 dark:border-white/5 shrink-0 h-1/2 lg:h-full">
           
           {/* AI Header */}
-          <div className="p-4 border-b border-white/5 bg-[#090d16] flex items-center gap-2">
+          <div className="p-4 border-b border-slate-200 dark:border-white/5 bg-white dark:bg-[#090d16] flex items-center gap-2">
             <span className="text-lg">🤖</span>
             <div>
-              <h2 className="text-xs font-bold text-white">AI Study Companion</h2>
+              <h2 className="text-xs font-bold text-slate-900 dark:text-white">AI Study Companion</h2>
               <p className="text-[10px] text-slate-500">Retrieval-Augmented Study Assistant</p>
             </div>
           </div>
@@ -122,15 +122,15 @@ export default function PdfViewer({ fileUrl, title, subjectName, subjectUrl }: P
                 key={idx}
                 className={`flex flex-col max-w-[85%] rounded-2xl p-3 leading-relaxed ${
                   msg.sender === "user"
-                    ? "bg-cyber-blue/20 text-slate-100 border border-cyber-blue/25 self-end ml-auto"
-                    : "bg-white/5 text-slate-300 border border-white/5 self-start mr-auto"
+                    ? "bg-cyber-blue/20 text-slate-900 dark:text-slate-100 border border-cyber-blue/25 self-end ml-auto"
+                    : "bg-slate-200/80 dark:bg-white/5 text-slate-800 dark:text-slate-300 border border-slate-300/50 dark:border-white/5 self-start mr-auto"
                 }`}
               >
                 <div className="whitespace-pre-line">{msg.text}</div>
               </div>
             ))}
             {isTyping && (
-              <div className="bg-white/5 text-slate-500 border border-white/5 self-start mr-auto rounded-2xl p-3 max-w-[80%] flex items-center gap-1.5">
+              <div className="bg-slate-200/80 dark:bg-white/5 text-slate-600 dark:text-slate-500 border border-slate-300/50 dark:border-white/5 self-start mr-auto rounded-2xl p-3 max-w-[80%] flex items-center gap-1.5">
                 <span className="relative flex h-2 w-2">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-slate-500 opacity-75"></span>
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-slate-500"></span>
@@ -141,14 +141,14 @@ export default function PdfViewer({ fileUrl, title, subjectName, subjectUrl }: P
           </div>
 
           {/* Chat Control Footer */}
-          <div className="p-4 border-t border-white/5 bg-[#090d16] space-y-3 shrink-0">
+          <div className="p-4 border-t border-slate-200 dark:border-white/5 bg-white dark:bg-[#090d16] space-y-3 shrink-0">
             {/* Quick Suggestions list */}
             <div className="flex gap-2 overflow-x-auto pb-1 text-[10px]">
               {samplePrompts.map((p, idx) => (
                 <button
                   key={idx}
                   onClick={() => handleSend(p)}
-                  className="flex-shrink-0 bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white px-2 py-1 rounded-lg border border-white/5 transition-colors"
+                  className="flex-shrink-0 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-700 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white px-2 py-1 rounded-lg border border-slate-200 dark:border-white/5 transition-colors"
                 >
                   {p}
                 </button>
@@ -168,7 +168,7 @@ export default function PdfViewer({ fileUrl, title, subjectName, subjectUrl }: P
                 value={inputVal}
                 onChange={(e) => setInputVal(e.target.value)}
                 placeholder="Ask about equations, code, definitions..."
-                className="flex-grow bg-[#111726] border border-white/5 focus:border-cyber-blue/50 text-slate-200 text-xs rounded-xl px-3 py-2.5 focus:outline-none"
+                className="flex-grow bg-slate-50 dark:bg-[#111726] border border-slate-200 dark:border-white/5 focus:border-cyber-blue/50 text-slate-900 dark:text-slate-200 text-xs rounded-xl px-3 py-2.5 focus:outline-none"
               />
               <button
                 type="submit"

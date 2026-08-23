@@ -1,35 +1,35 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { SUBJECT_DATA } from "@/lib/subjects";
 
-const SEMESTER_SUBJECTS: Record<string, { name: string; slug: string }[]> = {
-  "sem-1": [
-    { name: "Engineering Mathematics-I", slug: "engineering-mathematics-1" },
-    { name: "Engineering Physics", slug: "engineering-physics" },
-    { name: "Programming for Problem Solving", slug: "programming-problem-solving" },
-  ],
-  "sem-2": [
-    { name: "Engineering Mathematics-II", slug: "engineering-mathematics-2" },
-    { name: "Engineering Chemistry", slug: "engineering-chemistry" },
-  ],
-  "sem-3": [
-    { name: "Data Structures & Algorithms", slug: "data-structures-algorithms" },
-    { name: "Computer Organization & Architecture", slug: "computer-organization-architecture" },
-    { name: "Discrete Mathematics", slug: "discrete-mathematics" },
-  ],
-  "sem-4": [
-    { name: "Operating Systems", slug: "operating-systems" },
-    { name: "Database Management Systems", slug: "database-management-systems" },
-    { name: "Theory of Automata & Formal Languages", slug: "theory-automata" },
-  ],
-};
+function UploadFormContent() {
+  const searchParams = useSearchParams();
+  const initialType = searchParams.get("type");
+  const initialSem = searchParams.get("semester") || "sem-1";
+  const initialSubject = searchParams.get("subject") || "";
+  const initialYear = searchParams.get("year") || "2024-25";
+  const initialExamType = searchParams.get("examType") || "End Semester";
 
-export default function ResourceUploadPage() {
   const [title, setTitle] = useState("");
-  const [type, setType] = useState("NOTES_PDF");
-  const [semester, setSemester] = useState("sem-3");
-  const [subject, setSubject] = useState("data-structures-algorithms");
+  const [type, setType] = useState(initialType?.toUpperCase() === "PYQ" || initialType?.toUpperCase() === "PYQ_PDF" ? "PYQ_PDF" : "NOTES_PDF");
+  const [semester, setSemester] = useState(SUBJECT_DATA[initialSem] ? initialSem : "sem-1");
+
+  // PYQ Specific Fields
+  const [pyqYear, setPyqYear] = useState(initialYear);
+  const [pyqExamType, setPyqExamType] = useState(initialExamType);
+
+  // Get active subjects from shared source of truth
+  const activeSemesterObj = SUBJECT_DATA[semester] || SUBJECT_DATA["sem-1"];
+  const activeSubjects = activeSemesterObj.subjects;
+
+  const [subjectSlug, setSubjectSlug] = useState(
+    initialSubject && activeSubjects.some((s) => s.slug === initialSubject)
+      ? initialSubject
+      : activeSubjects[0]?.slug || ""
+  );
   const [unit, setUnit] = useState("1");
   const [file, setFile] = useState<File | null>(null);
 
@@ -37,23 +37,38 @@ export default function ResourceUploadPage() {
   const [successMsg, setSuccessMsg] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
 
-  const activeSubjects = SEMESTER_SUBJECTS[semester] || [];
+  useEffect(() => {
+    if (initialType && (initialType.toLowerCase() === "pyq" || initialType.toUpperCase() === "PYQ_PDF")) {
+      setType("PYQ_PDF");
+    }
+  }, [initialType]);
+
+  // Selected subject object
+  const selectedSubjectObj = activeSubjects.find((s) => s.slug === subjectSlug) || activeSubjects[0];
+  const maxUnits = selectedSubjectObj?.unitsCount || 5;
+  const unitsList = Array.from({ length: maxUnits }, (_, i) => (i + 1).toString());
 
   const handleSemesterChange = (semValue: string) => {
     setSemester(semValue);
-    const subjectsForSem = SEMESTER_SUBJECTS[semValue] || [];
-    if (subjectsForSem.length > 0) {
-      setSubject(subjectsForSem[0].slug);
+    const newSemObj = SUBJECT_DATA[semValue];
+    if (newSemObj && newSemObj.subjects.length > 0) {
+      setSubjectSlug(newSemObj.subjects[0].slug);
     } else {
-      setSubject("");
+      setSubjectSlug("");
     }
+    setUnit("1");
+  };
+
+  const handleSubjectChange = (slugValue: string) => {
+    setSubjectSlug(slugValue);
+    setUnit("1");
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const selectedFile = e.target.files[0];
       if (selectedFile.type !== "application/pdf") {
-        setErrorMsg("Only PDF files are supported for notes and syllabus.");
+        setErrorMsg("Only PDF files are supported for notes and PYQs.");
         setFile(null);
         return;
       }
@@ -78,8 +93,13 @@ export default function ResourceUploadPage() {
     formData.append("title", title);
     formData.append("type", type);
     formData.append("semester", semester);
-    formData.append("subject", subject);
+    formData.append("subject", subjectSlug);
     formData.append("unit", unit);
+
+    if (type === "PYQ_PDF") {
+      formData.append("year", pyqYear);
+      formData.append("examType", pyqExamType);
+    }
 
     try {
       const response = await fetch("/api/resources/upload", {
@@ -108,38 +128,65 @@ export default function ResourceUploadPage() {
   };
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-12 sm:px-6 lg:px-8 space-y-8">
+    <div className="mx-auto max-w-4xl px-4 py-12 sm:px-6 lg:px-8 space-y-8">
       
-      {/* Title */}
-      <div className="space-y-1">
-        <h1 className="font-heading text-3xl font-extrabold text-white">
-          Contribute Notes
+      {/* Navigation Breadcrumbs */}
+      <nav className="flex items-center gap-2 text-xs text-slate-500">
+        <Link href="/" className="hover:text-slate-900 dark:hover:text-white transition-colors">Home</Link>
+        <span>/</span>
+        <Link href="/dashboard" className="hover:text-slate-900 dark:hover:text-white transition-colors">Dashboard</Link>
+        <span>/</span>
+        <span className="text-slate-700 dark:text-slate-300 font-semibold">Contribute Material</span>
+      </nav>
+
+      {/* Form Header */}
+      <div className="space-y-2">
+        <h1 className="font-heading text-3xl font-extrabold text-slate-900 dark:text-white">
+          Contribute Academic Material
         </h1>
-        <p className="text-sm text-slate-400">
-          Upload handwritten notes, unit syllabus outlines, or PYQ papers to help fellow students.
+        <p className="text-sm text-slate-600 dark:text-slate-400">
+          Upload handwritten lecture notes, official syllabus outlines, or previous year question papers (PYQs) for AKTU engineering subjects.
         </p>
       </div>
 
-      {/* Main Upload Form Card */}
-      <div className="glass-panel p-8 rounded-3xl border border-white/10 shadow-xl bg-[#090d16]">
+      {/* Upload Form Card */}
+      <div className="glass-panel p-8 rounded-3xl relative overflow-hidden bg-white/80 dark:bg-[#090d16] border border-slate-200 dark:border-white/10 shadow-2xl">
         
         {successMsg && (
-          <div className="mb-6 p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-xs text-emerald-400">
+          <div className="mb-6 p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-xs text-emerald-600 dark:text-emerald-400 font-semibold">
             {successMsg}
           </div>
         )}
 
         {errorMsg && (
-          <div className="mb-6 p-4 rounded-xl bg-rose-500/10 border border-rose-500/25 text-xs text-rose-400">
+          <div className="mb-6 p-4 rounded-xl bg-rose-500/10 border border-rose-500/25 text-xs text-rose-600 dark:text-rose-400 font-semibold">
             {errorMsg}
           </div>
         )}
 
         <form onSubmit={handleSubmit} className="space-y-6">
           
-          {/* Note Title */}
+          {/* Resource Type Selection */}
           <div className="space-y-2">
-            <label htmlFor="title" className="text-xs font-semibold text-slate-300">
+            <label htmlFor="type" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+              Select Resource Type
+            </label>
+            <select
+              id="type"
+              value={type}
+              onChange={(e) => setType(e.target.value)}
+              className="w-full bg-white dark:bg-[#111726] border border-cyber-blue/30 text-slate-900 dark:text-slate-100 text-sm font-semibold rounded-xl px-4 py-3 focus:outline-none focus:border-cyber-blue"
+            >
+              <option value="NOTES_PDF">Lecture Notes PDF</option>
+              <option value="PYQ_PDF">Previous Year Question Paper (PYQ)</option>
+              <option value="SYLLABUS">Syllabus Outline Guide</option>
+              <option value="IMPORTANT_QUESTION">Important Sessional Questions</option>
+            </select>
+          </div>
+
+          {/* Resource Title */}
+          <div className="space-y-2">
+            <label htmlFor="title" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
               Resource Title
             </label>
             <input
@@ -148,137 +195,176 @@ export default function ResourceUploadPage() {
               required
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g. Unit 1 Trees Handwritten Notes (Topper)"
-              className="w-full bg-[#111726] border border-white/5 focus:border-cyber-blue/50 text-slate-200 text-sm rounded-xl px-4 py-3 focus:outline-none"
+              placeholder={type === "PYQ_PDF" ? "e.g. 2024-25 Regular End Semester Solved Question Paper" : "e.g. Unit 1 Trees Handwritten Notes (Topper)"}
+              className="w-full bg-white dark:bg-[#111726] border border-slate-200 dark:border-white/5 focus:border-cyber-blue/50 text-slate-900 dark:text-slate-200 text-sm rounded-xl px-4 py-3 focus:outline-none"
             />
           </div>
 
           {/* Semester & Subject Selection Group */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
             <div className="space-y-2">
-              <label htmlFor="semester" className="text-xs font-semibold text-slate-300">
+              <label htmlFor="semester" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
                 Semester
               </label>
               <select
                 id="semester"
                 value={semester}
                 onChange={(e) => handleSemesterChange(e.target.value)}
-                className="w-full bg-[#111726] border border-white/5 focus:border-cyber-blue/50 text-slate-200 text-sm rounded-xl px-4 py-3 focus:outline-none"
+                className="w-full bg-white dark:bg-[#111726] border border-slate-200 dark:border-white/5 focus:border-cyber-blue/50 text-slate-900 dark:text-slate-200 text-sm rounded-xl px-4 py-3 focus:outline-none"
               >
-                <option value="sem-1">Semester 1</option>
-                <option value="sem-2">Semester 2</option>
-                <option value="sem-3">Semester 3</option>
-                <option value="sem-4">Semester 4</option>
+                {Object.keys(SUBJECT_DATA).map((key) => (
+                  <option key={key} value={key}>
+                    {SUBJECT_DATA[key].title} ({SUBJECT_DATA[key].subjects.length} Subjects)
+                  </option>
+                ))}
               </select>
             </div>
 
             <div className="space-y-2">
-              <label htmlFor="subject" className="text-xs font-semibold text-slate-300">
-                Subject
+              <label htmlFor="subject" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Subject ({activeSubjects.length} Available)
               </label>
               <select
                 id="subject"
-                value={subject}
-                onChange={(e) => setSubject(e.target.value)}
-                className="w-full bg-[#111726] border border-white/5 focus:border-cyber-blue/50 text-slate-200 text-sm rounded-xl px-4 py-3 focus:outline-none"
+                value={subjectSlug}
+                onChange={(e) => handleSubjectChange(e.target.value)}
+                className="w-full bg-white dark:bg-[#111726] border border-slate-200 dark:border-white/5 focus:border-cyber-blue/50 text-slate-900 dark:text-slate-200 text-sm rounded-xl px-4 py-3 focus:outline-none truncate"
               >
                 {activeSubjects.map((sub) => (
                   <option key={sub.slug} value={sub.slug}>
-                    {sub.name}
+                    [{sub.code}] {sub.name} ({sub.type})
                   </option>
                 ))}
               </select>
             </div>
           </div>
 
-          {/* Unit & Resource Type Selection Group */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+          {/* Unit selection OR PYQ Year & Exam Type Group */}
+          {type === "PYQ_PDF" ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 p-4 rounded-2xl bg-cyber-blue/5 border border-cyber-blue/20">
+              <div className="space-y-2">
+                <label htmlFor="pyq-year" className="text-xs font-bold text-cyber-blue">
+                  Academic Session Year
+                </label>
+                <select
+                  id="pyq-year"
+                  value={pyqYear}
+                  onChange={(e) => setPyqYear(e.target.value)}
+                  className="w-full bg-white dark:bg-[#111726] border border-slate-200 dark:border-white/10 text-slate-900 dark:text-slate-200 text-sm rounded-xl px-4 py-2.5 focus:outline-none"
+                >
+                  <option value="2025-26">2025-26</option>
+                  <option value="2024-25">2024-25</option>
+                  <option value="2023-24">2023-24</option>
+                  <option value="2022-23">2022-23</option>
+                  <option value="2021-22">2021-22</option>
+                  <option value="2020-21">2020-21</option>
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <label htmlFor="pyq-exam" className="text-xs font-bold text-cyber-blue">
+                  Exam Type Category
+                </label>
+                <select
+                  id="pyq-exam"
+                  value={pyqExamType}
+                  onChange={(e) => setPyqExamType(e.target.value)}
+                  className="w-full bg-white dark:bg-[#111726] border border-slate-200 dark:border-white/10 text-slate-900 dark:text-slate-200 text-sm rounded-xl px-4 py-2.5 focus:outline-none"
+                >
+                  <option value="End Semester">End Semester Exam</option>
+                  <option value="Sessional 1">Sessional 1 Exam</option>
+                  <option value="Sessional 2">Sessional 2 Exam</option>
+                  <option value="Model Paper">Model Practice Paper</option>
+                </select>
+              </div>
+            </div>
+          ) : (
             <div className="space-y-2">
-              <label htmlFor="unit" className="text-xs font-semibold text-slate-300">
+              <label htmlFor="unit" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
                 Syllabus Unit
               </label>
               <select
                 id="unit"
                 value={unit}
                 onChange={(e) => setUnit(e.target.value)}
-                className="w-full bg-[#111726] border border-white/5 focus:border-cyber-blue/50 text-slate-200 text-sm rounded-xl px-4 py-3 focus:outline-none"
+                className="w-full bg-white dark:bg-[#111726] border border-slate-200 dark:border-white/5 focus:border-cyber-blue/50 text-slate-900 dark:text-slate-200 text-sm rounded-xl px-4 py-3 focus:outline-none"
               >
-                <option value="1">Unit 1</option>
-                <option value="2">Unit 2</option>
-                <option value="3">Unit 3</option>
-                <option value="4">Unit 4</option>
-                <option value="5">Unit 5</option>
+                {unitsList.map((u) => (
+                  <option key={u} value={u}>
+                    Unit {u}
+                  </option>
+                ))}
               </select>
             </div>
+          )}
 
-            <div className="space-y-2">
-              <label htmlFor="type" className="text-xs font-semibold text-slate-300">
-                Resource Type
-              </label>
-              <select
-                id="type"
-                value={type}
-                onChange={(e) => setType(e.target.value)}
-                className="w-full bg-[#111726] border border-white/5 focus:border-cyber-blue/50 text-slate-200 text-sm rounded-xl px-4 py-3 focus:outline-none"
-              >
-                <option value="NOTES_PDF">Lecture Notes PDF</option>
-                <option value="SYLLABUS">Syllabus Outline Guide</option>
-                <option value="IMPORTANT_QUESTION">Important Sessional Questions</option>
-              </select>
-            </div>
-          </div>
-
-          {/* File Picker */}
+          {/* File Drag and Drop / Input */}
           <div className="space-y-2">
-            <label className="text-xs font-semibold text-slate-300 block">
-              Attach PDF File
+            <label htmlFor="file-upload" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+              PDF Document Upload
             </label>
-            <div className="flex items-center justify-center w-full">
-              <label className="flex flex-col items-center justify-center w-full h-36 border-2 border-dashed border-white/10 hover:border-cyber-blue/40 rounded-2xl cursor-pointer bg-[#111726] hover:bg-white/[0.02] transition-all">
-                <div className="flex flex-col items-center justify-center pt-5 pb-6 text-center px-4">
-                  <svg className="w-8 h-8 mb-3 text-slate-500" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5V9.75m0 0l3 3m-3-3l-3 3M6.75 19.5a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.233-2.33 3 3 0 013.758 3.848A3.752 3.752 0 0118 19.5H6.75z" />
-                  </svg>
-                  <p className="text-xs font-bold text-slate-300">
-                    {file ? file.name : "Click to select notes PDF"}
-                  </p>
-                  <p className="text-[10px] text-slate-500 mt-1">
-                    {file ? `${(file.size / 1024).toFixed(1)} KB` : "Max file size: 10MB"}
-                  </p>
+            <div className="border-2 border-dashed border-slate-300 dark:border-white/10 hover:border-cyber-blue/40 rounded-2xl p-6 text-center bg-slate-50 dark:bg-[#111726]/50 transition-colors">
+              <input
+                id="file-upload"
+                type="file"
+                accept="application/pdf"
+                onChange={handleFileChange}
+                className="hidden"
+              />
+              <label
+                htmlFor="file-upload"
+                className="cursor-pointer flex flex-col items-center justify-center space-y-2"
+              >
+                <div className="h-12 w-12 rounded-full bg-cyber-blue/10 flex items-center justify-center text-cyber-blue text-xl">
+                  📄
                 </div>
-                <input
-                  id="file-upload"
-                  type="file"
-                  accept="application/pdf"
-                  required
-                  onChange={handleFileChange}
-                  className="hidden"
-                />
+                <div className="text-xs text-slate-700 dark:text-slate-300 font-medium">
+                  {file ? (
+                    <span className="text-cyber-blue font-bold">{file.name} ({(file.size / 1024 / 1024).toFixed(2)} MB)</span>
+                  ) : (
+                    <span>Click to browse or drop your PDF document here</span>
+                  )}
+                </div>
+                <span className="text-[10px] text-slate-500">Supported format: PDF only (Max size: 25MB)</span>
               </label>
             </div>
           </div>
 
-          {/* Form Actions */}
-          <div className="flex gap-4 pt-2">
-            <Link
-              href="/dashboard"
-              className="flex-1 text-center border border-white/10 hover:bg-white/5 rounded-xl py-3 text-xs font-semibold text-slate-300 transition-colors"
-            >
-              Back to Portal
-            </Link>
-            <button
-              type="submit"
-              disabled={isUploading}
-              className="flex-1 inline-flex items-center justify-center rounded-xl bg-cyber-blue py-3 text-xs font-semibold text-white hover:bg-blue-600 disabled:opacity-50 transition-colors shadow-lg shadow-cyber-blue/20"
-            >
-              {isUploading ? "Uploading file..." : "Contribute Notes"}
-            </button>
-          </div>
+          {/* Submit Action Button */}
+          <button
+            type="submit"
+            disabled={isUploading}
+            className="w-full rounded-xl bg-cyber-blue py-3.5 text-sm font-bold text-white shadow-lg shadow-cyber-blue/20 hover:bg-blue-600 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            {isUploading ? (
+              <>
+                <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                <span>Uploading Resource...</span>
+              </>
+            ) : (
+              <span>Submit Resource for Moderation 🚀</span>
+            )}
+          </button>
 
         </form>
 
       </div>
 
     </div>
+  );
+}
+
+export default function ResourceUploadPage() {
+  return (
+    <Suspense fallback={
+      <div className="mx-auto max-w-4xl px-4 py-12 text-center text-slate-400">
+        Loading upload form...
+      </div>
+    }>
+      <UploadFormContent />
+    </Suspense>
   );
 }

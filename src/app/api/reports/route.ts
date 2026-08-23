@@ -5,19 +5,16 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { resourceId, reason, description } = body;
 
-    if (!resourceId || !reason) {
-      return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+    if (!resourceId || typeof resourceId !== "string" || !reason || typeof reason !== "string") {
+      return NextResponse.json({ error: "Missing or invalid required fields" }, { status: 400 });
     }
 
-    // Mock writing report to database logs for MVP
-    console.log(`[Reporting Analytics] New Report Received!
-      - Resource ID: ${resourceId}
-      - Reason: ${reason}
-      - Details: ${description || "None"}
-      - Time: ${new Date().toISOString()}
-    `);
+    const cleanResourceId = resourceId.slice(0, 100);
+    const cleanReason = reason.slice(0, 100);
+    const cleanDescription = (description ? String(description) : "").slice(0, 500);
 
-    // Success response
+    console.log(`[Reports Analytics] Report Logged: ResourceID=${cleanResourceId}, Reason=${cleanReason}`);
+
     return NextResponse.json({
       success: true,
       message: "Report logged successfully. Our team will review the resource.",

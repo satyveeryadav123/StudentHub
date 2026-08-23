@@ -3,6 +3,9 @@ import { Inter, Outfit } from "next/font/google";
 import "./globals.css";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
+import { AuthProvider } from "@/context/AuthContext";
+import AuthModal from "@/components/modules/AuthModal";
+import { ThemeProvider } from "@/components/providers/ThemeProvider";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -30,6 +33,11 @@ export const metadata: Metadata = {
     "Syllabus Guide",
   ],
   authors: [{ name: "StudentHub Team" }],
+  icons: {
+    icon: "/favicon.ico",
+    shortcut: "/favicon.ico",
+    apple: "/icon.png",
+  },
 };
 
 export default function RootLayout({
@@ -39,29 +47,36 @@ export default function RootLayout({
   children: React.ReactNode;
   childrenContent?: React.ReactNode;
 }>) {
-  // Use children or childrenContent if available
   const content = children || childrenContent;
 
   return (
     <html
       lang="en"
+      suppressHydrationWarning
       className={`${inter.variable} ${outfit.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col bg-brand-bg text-slate-100 selection:bg-cyber-blue/30 selection:text-white">
-        <div className="relative min-h-screen flex flex-col justify-between">
-          {/* Subtle global gradient background glow */}
-          <div className="absolute top-0 left-1/4 w-96 h-96 bg-cyber-blue/10 rounded-full blur-[120px] pointer-events-none -z-10" />
-          <div className="absolute bottom-20 right-1/4 w-96 h-96 bg-cyber-indigo/10 rounded-full blur-[120px] pointer-events-none -z-10" />
+      <body className="min-h-full flex flex-col bg-slate-50 dark:bg-brand-bg text-slate-900 dark:text-slate-100 selection:bg-cyber-blue/30 selection:text-white transition-colors duration-300">
+        <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
+          <AuthProvider>
+            <div className="relative min-h-screen flex flex-col justify-between overflow-x-clip">
+              {/* Subtle global gradient background glow */}
+              <div className="absolute top-0 left-1/4 w-96 h-96 bg-cyber-blue/10 dark:bg-cyber-blue/10 rounded-full blur-[120px] pointer-events-none -z-10" />
+              <div className="absolute bottom-20 right-1/4 w-96 h-96 bg-cyber-indigo/10 dark:bg-cyber-indigo/10 rounded-full blur-[120px] pointer-events-none -z-10" />
 
-          {/* Navbar */}
-          <Navbar />
+              {/* Navbar */}
+              <Navbar />
 
-          {/* Main content wrapper */}
-          <main className="flex-grow flex flex-col">{content}</main>
+              {/* Main content wrapper */}
+              <main className="flex-grow flex flex-col">{content}</main>
 
-          {/* Footer */}
-          <Footer />
-        </div>
+              {/* Footer */}
+              <Footer />
+            </div>
+
+            {/* Global Auth Modal */}
+            <AuthModal />
+          </AuthProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

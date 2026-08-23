@@ -1,0 +1,40 @@
+================================================================================
+ATS-FRIENDLY SINGLE-COLUMN RESUME TEMPLATE
+================================================================================
+FIRSTNAME LASTNAME
+City, State | (123) 456-7890 | email@domain.com | linkedin.com/in/username | github.com/username
+
+--------------------------------------------------------------------------------
+EDUCATION
+--------------------------------------------------------------------------------
+Dr. A.P.J. Abdul Kalam Technical University (AKTU)                 City, State
+B.Tech in Computer Science & Engineering                         Aug 2022 - Present
+GPA / CGPA: 8.5 / 10.0
+
+--------------------------------------------------------------------------------
+TECHNICAL SKILLS
+--------------------------------------------------------------------------------
+Languages:      C++, Java, Python, JavaScript, TypeScript, SQL, HTML/CSS
+Frameworks:     React.js, Next.js, Node.js, Express.js, TailwindCSS
+Tools/Tech:     Git/GitHub, Docker, Linux Shell, Postman, VS Code
+Core CS:        Data Structures & Algorithms, OS, DBMS, Computer Networks
+
+--------------------------------------------------------------------------------
+PROJECTS
+--------------------------------------------------------------------------------
+StudentHub Academic Resource Portal                             Next.js, React, Tailwind
+- Built a responsive full-stack academic portal for 5,000+ engineering students.
+- Implemented SGPA/CGPA grade calculation algorithms matching AKTU evaluation schemes.
+- Designed dynamic search and subject navigation modules across 8 semesters.
+
+Real-Time Chat & Collaboration App                              Node.js, WebSockets, MongoDB
+- Developed a low-latency chat application supporting concurrent WebSocket connections.
+- Reduced message delivery latency by 40% using optimized MongoDB indexing.
+
+--------------------------------------------------------------------------------
+EXPERIENCE / LEADERSHIP
+--------------------------------------------------------------------------------
+Software Engineering Intern - Tech Solutions                     Jun 2024 - Aug 2024
+- Contributed to RESTful API endpoints servicing 50k daily active users.
+- Authored unit test coverage improving code reliability by 25%.
+================================================================================
