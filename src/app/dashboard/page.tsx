@@ -1,9 +1,11 @@
 "use client";
 
-import { FormEvent, useEffect, useState, useRef } from "react";
+import { FormEvent, useEffect, useState, useRef, useCallback } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
-import { generateDefaultChecklist, ChecklistItem as SubjectChecklistItem, SUBJECT_DATA } from "@/lib/subjects";
+import { generateDefaultChecklist, ChecklistItem as SubjectChecklistItem } from "@/lib/subjects";
+import { createClient } from "@/lib/supabase/client";
 
 type PomodoroMode = "focus" | "break";
 
@@ -40,6 +42,18 @@ interface Bookmark {
   url: string;
   unit?: string;
   type?: string;
+}
+
+export interface MyUploadResource {
+  id: string;
+  title: string;
+  type: string;
+  semester?: number | null;
+  subject_slug?: string | null;
+  unit_number?: number | null;
+  status: "PENDING" | "APPROVED" | "REJECTED";
+  rejection_reason?: string | null;
+  created_at: string;
 }
 
 const FOCUS_DURATION = 25 * 60;
@@ -145,10 +159,20 @@ function WidgetSkeleton({ className = "h-48" }: { className?: string }) {
 }
 
 export default function StudentDashboardPage() {
-  const { user, isLoggedIn, openAuthModal, signOut } = useAuth();
+  const router = useRouter();
+  const { user, profile, isAdmin, isLoggedIn, loading, openAuthModal, signOut } = useAuth();
+  const [supabase] = useState(() => createClient());
   const [isMounted, setIsMounted] = useState(false);
 
+  // Admin routing check: if logged in as admin, redirect to /admin
+  useEffect(() => {
+    if (!loading && isLoggedIn && (isAdmin || profile?.role === "admin")) {
+      router.replace("/admin");
+    }
+  }, [loading, isLoggedIn, isAdmin, profile, router]);
+
   // Core Persistent State Hooks
+  const [myUploads, setMyUploads] = useState<MyUploadResource[]>([]);
   const [focus, setFocus] = useState<FocusState>({ name: "", progress: 0 });
   const [customSubject, setCustomSubject] = useState("");
   const [tasks, setTasks] = useState<StudyTask[]>([]);
@@ -166,6 +190,7 @@ export default function StudentDashboardPage() {
   });
 
   const focusToolsRef = useRef<HTMLDivElement>(null);
+  const hasLoadedFromCloud = useRef(false);
 
   // Hydration Load & Merging with Full AKTU Curriculum
   useEffect(() => {
@@ -220,6 +245,116 @@ export default function StudentDashboardPage() {
 
     return () => window.clearTimeout(timer);
   }, []);
+
+  // Fetch and Sync with Supabase on mount / login
+  const fetchCloudData = useCallback(async (userId: string) => {
+    try {
+      // 1. Fetch dashboard_data
+      const { data: cloudDashboard } = await supabase
+        .from("dashboard_data")
+        .select("*")
+        .eq("user_id", userId)
+        .single();
+
+      if (cloudDashboard) {
+        if (Array.isArray(cloudDashboard.tasks) && cloudDashboard.tasks.length > 0) {
+          setTasks(cloudDashboard.tasks);
+        }
+        if (Array.isArray(cloudDashboard.checklist) && cloudDashboard.checklist.length > 0) {
+          setChecklist(cloudDashboard.checklist);
+        }
+        if (cloudDashboard.focus_subject) {
+          setFocus({
+            name: cloudDashboard.focus_subject,
+            progress: cloudDashboard.focus_progress ?? 0,
+          });
+        }
+      }
+
+      // 2. Fetch Grade History
+      const { data: userGrades } = await supabase
+        .from("grade_history")
+        .select("*")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false });
+
+      if (userGrades && userGrades.length > 0) {
+        const mappedGrades: SavedCalculation[] = userGrades.map((g) => ({
+          id: g.id,
+          type: g.type,
+          score: Number(g.score),
+          date: new Date(g.created_at).toLocaleDateString(),
+        }));
+        setCalculations(mappedGrades);
+      }
+
+      // 3. Fetch Bookmarks from Supabase bookmarks table (join with resources)
+      const { data: userBookmarks } = await supabase
+        .from("bookmarks")
+        .select("id, resource_id, resources(id, title, type, subject_slug, unit_number, semester, file_url)")
+        .eq("user_id", userId);
+
+      if (userBookmarks && userBookmarks.length > 0) {
+        const mappedBookmarks: Bookmark[] = userBookmarks.map((b: any) => {
+          const res = Array.isArray(b.resources) ? b.resources[0] : b.resources;
+          return {
+            id: b.id,
+            title: res?.title || "Resource",
+            subjectName: res?.subject_slug || "Subject",
+            url: res?.file_url || (res?.subject_slug ? `/notes/sem-${res.semester || 1}/${res.subject_slug}` : "/notes"),
+            unit: res?.unit_number ? String(res.unit_number) : undefined,
+            type: res?.type,
+          };
+        });
+        setBookmarks(mappedBookmarks);
+      }
+
+      // 4. Fetch User's Uploaded Resources
+      const { data: userUploads } = await supabase
+        .from("resources")
+        .select("id, title, type, semester, subject_slug, unit_number, status, rejection_reason, created_at")
+        .eq("uploaded_by", userId)
+        .order("created_at", { ascending: false });
+
+      if (userUploads) {
+        setMyUploads(userUploads as MyUploadResource[]);
+      }
+
+      hasLoadedFromCloud.current = true;
+    } catch (err) {
+      console.error("Failed to sync cloud dashboard data:", err);
+    }
+  }, [supabase]);
+
+  useEffect(() => {
+    if (isMounted && user?.id) {
+      fetchCloudData(user.id);
+    }
+  }, [isMounted, user?.id, fetchCloudData]);
+
+  // Debounced cloud sync (2 seconds) to dashboard_data table
+  useEffect(() => {
+    if (!isMounted || !user?.id) return;
+
+    const timer = setTimeout(async () => {
+      try {
+        await supabase.from("dashboard_data").upsert({
+          user_id: user.id,
+          focus_subject: focus.name || null,
+          focus_progress: focus.progress || 0,
+          tasks: tasks,
+          checklist: checklist,
+          visit_log: visitLog,
+          pomo_sessions: pomo.sessions,
+          updated_at: new Date().toISOString(),
+        });
+      } catch (err) {
+        console.error("Auto-sync error:", err);
+      }
+    }, 2000);
+
+    return () => clearTimeout(timer);
+  }, [focus, tasks, checklist, visitLog, pomo.sessions, user?.id, isMounted, supabase]);
 
   // Save changes to LocalStorage
   useEffect(() => {
@@ -332,15 +467,29 @@ export default function StudentDashboardPage() {
   const tasksPercent = tasks.length ? Math.round((completedTasksCount / tasks.length) * 100) : 0;
 
   // Bookmark Actions
-  const removeBookmark = (id: string, e: React.MouseEvent) => {
+  const removeBookmark = async (id: string, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setBookmarks((curr) => curr.filter((b) => b.id !== id));
+    if (user?.id) {
+      try {
+        await supabase.from("bookmarks").delete().eq("id", id);
+      } catch (err) {
+        console.error("Failed to delete cloud bookmark:", err);
+      }
+    }
   };
 
   // Grade History Actions
-  const deleteCalculation = (id: string) => {
+  const deleteCalculation = async (id: string) => {
     setCalculations((curr) => curr.filter((c) => c.id !== id));
+    if (user?.id) {
+      try {
+        await supabase.from("grade_history").delete().eq("id", id);
+      } catch (err) {
+        console.error("Failed to delete cloud grade record:", err);
+      }
+    }
   };
 
   // Start Focus Session Handler (connects FocusWidget to Pomodoro)
@@ -354,7 +503,7 @@ export default function StudentDashboardPage() {
     focusToolsRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
-  const welcomeName = isMounted && isLoggedIn && user ? user.name : "Student";
+  const welcomeName = isMounted && isLoggedIn && user ? (user.name || "Student") : "Student";
   const userBranch = isMounted && isLoggedIn && user?.branch ? user.branch : "Computer Science & Engineering";
 
   if (!isMounted) {
@@ -369,6 +518,17 @@ export default function StudentDashboardPage() {
         <div className="grid lg:grid-cols-2 gap-6">
           <WidgetSkeleton className="h-72" />
           <WidgetSkeleton className="h-72" />
+        </div>
+      </div>
+    );
+  }
+
+  if (isLoggedIn && (isAdmin || profile?.role === "admin")) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-8 w-8 border-2 border-cyber-blue border-t-transparent rounded-full animate-spin" />
+          <p className="text-xs text-slate-500 font-semibold">Redirecting to Admin Panel...</p>
         </div>
       </div>
     );
@@ -399,7 +559,7 @@ export default function StudentDashboardPage() {
             <span>•</span>
             {isLoggedIn ? (
               <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-semibold">
-                <span>●</span> Profile Synced
+                <span>●</span> Synced to cloud ☁️
               </span>
             ) : (
               <button
@@ -447,6 +607,114 @@ export default function StudentDashboardPage() {
             </div>
           )}
         </div>
+      </section>
+
+      {/* ========================================================================= */}
+      {/* 1.5. MY UPLOADS SECTION (CHANGE 4) */}
+      {/* ========================================================================= */}
+      <section className={`${PANEL_CLASS} space-y-6`}>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200/80 dark:border-white/5 pb-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xl">📤</span>
+              <h2 className="font-heading text-xl font-bold text-slate-900 dark:text-white">
+                My Uploads
+              </h2>
+              <span className="text-xs font-semibold text-cyber-blue bg-cyber-blue/10 px-2.5 py-0.5 rounded-full border border-cyber-blue/20">
+                {myUploads.length} {myUploads.length === 1 ? "Upload" : "Uploads"}
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+              Track the moderation and publication status of your contributed study resources.
+            </p>
+          </div>
+
+          <Link
+            href="/dashboard/upload"
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyber-blue to-cyber-indigo px-4 py-2.5 text-xs font-bold text-white shadow-lg shadow-cyber-blue/20 hover:opacity-95 transition-all w-full sm:w-auto hover:-translate-y-0.5"
+          >
+            <span>+</span>
+            <span>Upload Notes/PYQ</span>
+          </Link>
+        </div>
+
+        {myUploads.length === 0 ? (
+          <div className="text-center py-8 bg-slate-50/50 dark:bg-white/[0.01] border border-slate-200/80 dark:border-white/5 rounded-2xl space-y-3">
+            <span className="text-2xl">📚</span>
+            <div className="space-y-1">
+              <p className="text-xs font-bold text-slate-700 dark:text-slate-300">No resources uploaded yet</p>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Help other AKTU students by uploading verified lecture notes, handwritten formulas, or previous year papers.
+              </p>
+            </div>
+            <Link
+              href="/dashboard/upload"
+              className="inline-flex items-center gap-1.5 text-xs font-bold text-cyber-blue hover:underline"
+            >
+              <span>Upload your first document →</span>
+            </Link>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-slate-200 dark:border-white/10 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  <th className="py-2.5 px-3">Title & Type</th>
+                  <th className="py-2.5 px-3">Subject / Semester</th>
+                  <th className="py-2.5 px-3">Upload Date</th>
+                  <th className="py-2.5 px-3 text-right">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200/80 dark:divide-white/5 text-xs">
+                {myUploads.map((upload) => (
+                  <tr key={upload.id} className="hover:bg-slate-50/50 dark:hover:bg-white/[0.02] transition-colors">
+                    <td className="py-3.5 px-3">
+                      <div className="space-y-1">
+                        <span className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded bg-cyber-blue/10 text-cyber-blue border border-cyber-blue/20">
+                          {upload.type}
+                        </span>
+                        <div className="font-bold text-slate-900 dark:text-white line-clamp-1">
+                          {upload.title}
+                        </div>
+                      </div>
+                    </td>
+                    <td className="py-3.5 px-3 text-slate-600 dark:text-slate-400">
+                      <div className="font-medium text-slate-800 dark:text-slate-200">{upload.subject_slug || "General"}</div>
+                      <div className="text-[10px] text-slate-500">{upload.semester ? `Semester ${upload.semester}` : "N/A"}</div>
+                    </td>
+                    <td className="py-3.5 px-3 text-slate-500 whitespace-nowrap">
+                      {new Date(upload.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+                    </td>
+                    <td className="py-3.5 px-3 text-right">
+                      {upload.status === "PENDING" && (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/25">
+                          <span>⏳</span> Pending
+                        </span>
+                      )}
+                      {upload.status === "APPROVED" && (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25">
+                          <span>✅</span> Approved
+                        </span>
+                      )}
+                      {upload.status === "REJECTED" && (
+                        <div className="inline-flex flex-col items-end gap-0.5">
+                          <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-lg bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/25">
+                            <span>❌</span> Rejected
+                          </span>
+                          {upload.rejection_reason && (
+                            <span className="text-[10px] text-rose-500 dark:text-rose-400 max-w-xs text-right italic">
+                              Reason: {upload.rejection_reason}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
 
       {/* ========================================================================= */}
@@ -1193,6 +1461,7 @@ export default function StudentDashboardPage() {
             </span>
           </Link>
 
+
           <Link
             href="/calculator"
             className={`${PANEL_CLASS} p-5 flex flex-col justify-between hover:border-purple-500/50 group`}
@@ -1248,6 +1517,7 @@ export default function StudentDashboardPage() {
           </Link>
 
         </div>
+
       </section>
 
       {/* ========================================================================= */}

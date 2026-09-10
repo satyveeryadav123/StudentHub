@@ -113,7 +113,7 @@ export default function AboutPage() {
           </div>
           
           <h2 className="font-heading text-2xl sm:text-3xl lg:text-[32px] font-extrabold text-slate-900 dark:text-white tracking-tight leading-snug lg:whitespace-nowrap">
-            Built Solo by{" "}
+            Built by{" "}
             <span className="inline-block whitespace-nowrap text-transparent bg-clip-text bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 dark:from-blue-400 dark:via-indigo-300 dark:to-cyan-300">
               Satyveer Yadav
             </span>

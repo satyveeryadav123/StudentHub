@@ -14,12 +14,14 @@ export default function ReportModal({ isOpen, onClose, resourceId, resourceTitle
   const [description, setDescription] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
 
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
+    setErrorMsg("");
 
     try {
       const response = await fetch("/api/reports", {
@@ -32,16 +34,21 @@ export default function ReportModal({ isOpen, onClose, resourceId, resourceTitle
         }),
       });
 
-      if (response.ok) {
+      const data = await response.json();
+
+      if (response.ok && data.success) {
         setSubmitSuccess(true);
         setTimeout(() => {
           setSubmitSuccess(false);
           setDescription("");
           onClose();
         }, 2000);
+      } else {
+        setErrorMsg(data.error || "Failed to submit report. Please try again.");
       }
-    } catch (err) {
+    } catch (err: unknown) {
       console.error("Failed to submit report:", err);
+      setErrorMsg("Network error occurred. Please check your connection.");
     } finally {
       setIsSubmitting(false);
     }
@@ -81,6 +88,12 @@ export default function ReportModal({ isOpen, onClose, resourceId, resourceTitle
                 Resource: <span className="text-slate-800 dark:text-slate-200 font-semibold">{resourceTitle}</span>
               </p>
             </div>
+
+            {errorMsg && (
+              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/25 text-xs text-rose-600 dark:text-rose-400 font-semibold">
+                {errorMsg}
+              </div>
+            )}
 
             {/* Select Reason */}
             <div className="space-y-2">

@@ -6,6 +6,7 @@ import Footer from "@/components/layout/Footer";
 import { AuthProvider } from "@/context/AuthContext";
 import AuthModal from "@/components/modules/AuthModal";
 import { ThemeProvider } from "@/components/providers/ThemeProvider";
+import VisitorTracker from "@/components/analytics/VisitorTracker";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -42,12 +43,9 @@ export const metadata: Metadata = {
 
 export default function RootLayout({
   children,
-  childrenContent,
 }: Readonly<{
   children: React.ReactNode;
-  childrenContent?: React.ReactNode;
 }>) {
-  const content = children || childrenContent;
 
   return (
     <html
@@ -55,7 +53,7 @@ export default function RootLayout({
       suppressHydrationWarning
       className={`${inter.variable} ${outfit.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col bg-slate-50 dark:bg-brand-bg text-slate-900 dark:text-slate-100 selection:bg-cyber-blue/30 selection:text-white transition-colors duration-300">
+      <body className="min-h-full flex flex-col bg-[#f0f4ff] dark:bg-brand-bg text-[#0f172a] dark:text-slate-100 selection:bg-cyber-blue/30 selection:text-white transition-colors duration-300">
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
           <AuthProvider>
             <div className="relative min-h-screen flex flex-col justify-between overflow-x-clip">
@@ -67,14 +65,15 @@ export default function RootLayout({
               <Navbar />
 
               {/* Main content wrapper */}
-              <main className="flex-grow flex flex-col">{content}</main>
+              <main className="flex-grow flex flex-col">{children}</main>
 
               {/* Footer */}
               <Footer />
             </div>
 
-            {/* Global Auth Modal */}
+            {/* Global Auth Modal & Analytics Tracker */}
             <AuthModal />
+            <VisitorTracker />
           </AuthProvider>
         </ThemeProvider>
       </body>

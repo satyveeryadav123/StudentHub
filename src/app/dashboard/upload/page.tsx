@@ -3,9 +3,11 @@
 import { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { useAuth } from "@/context/AuthContext";
 import { SUBJECT_DATA } from "@/lib/subjects";
 
 function UploadFormContent() {
+  const { user, profile, isAdmin } = useAuth();
   const searchParams = useSearchParams();
   const initialType = searchParams.get("type");
   const initialSem = searchParams.get("semester") || "sem-1";
@@ -14,7 +16,11 @@ function UploadFormContent() {
   const initialExamType = searchParams.get("examType") || "End Semester";
 
   const [title, setTitle] = useState("");
-  const [type, setType] = useState(initialType?.toUpperCase() === "PYQ" || initialType?.toUpperCase() === "PYQ_PDF" ? "PYQ_PDF" : "NOTES_PDF");
+  const [type, setType] = useState(
+    initialType?.toUpperCase() === "PYQ" || initialType?.toUpperCase() === "PYQ_PDF"
+      ? "PYQ_PDF"
+      : "NOTES_PDF"
+  );
   const [semester, setSemester] = useState(SUBJECT_DATA[initialSem] ? initialSem : "sem-1");
 
   // PYQ Specific Fields
@@ -67,8 +73,13 @@ function UploadFormContent() {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const selectedFile = e.target.files[0];
-      if (selectedFile.type !== "application/pdf") {
+      if (selectedFile.type !== "application/pdf" && !selectedFile.name.toLowerCase().endsWith(".pdf")) {
         setErrorMsg("Only PDF files are supported for notes and PYQs.");
+        setFile(null);
+        return;
+      }
+      if (selectedFile.size > 10 * 1024 * 1024) {
+        setErrorMsg("File size exceeds the 10MB maximum limit.");
         setFile(null);
         return;
       }
@@ -110,7 +121,11 @@ function UploadFormContent() {
       const data = await response.json();
 
       if (response.ok && data.success) {
-        setSuccessMsg("Resource contributed successfully! It is now pending admin moderation.");
+        if (isAdmin || data.status === "APPROVED") {
+          setSuccessMsg("Your upload has been automatically approved and is now live!");
+        } else {
+          setSuccessMsg("Your notes are pending admin approval");
+        }
         setTitle("");
         setFile(null);
         // Clear input element
@@ -119,8 +134,8 @@ function UploadFormContent() {
       } else {
         setErrorMsg(data.error || "Failed to upload resource. Please try again.");
       }
-    } catch (err) {
-      console.error(err);
+    } catch (err: unknown) {
+      console.error("Upload error:", err);
       setErrorMsg("Network error occurred during note upload.");
     } finally {
       setIsUploading(false);
@@ -134,20 +149,43 @@ function UploadFormContent() {
       <nav className="flex items-center gap-2 text-xs text-slate-500">
         <Link href="/" className="hover:text-slate-900 dark:hover:text-white transition-colors">Home</Link>
         <span>/</span>
-        <Link href="/dashboard" className="hover:text-slate-900 dark:hover:text-white transition-colors">Dashboard</Link>
+        <Link href={isAdmin ? "/admin" : "/dashboard"} className="hover:text-slate-900 dark:hover:text-white transition-colors">
+          {isAdmin ? "Admin Panel" : "Dashboard"}
+        </Link>
         <span>/</span>
         <span className="text-slate-700 dark:text-slate-300 font-semibold">Contribute Material</span>
       </nav>
 
       {/* Form Header */}
       <div className="space-y-2">
-        <h1 className="font-heading text-3xl font-extrabold text-slate-900 dark:text-white">
-          Contribute Academic Material
-        </h1>
+        <div className="flex items-center gap-3">
+          <h1 className="font-heading text-3xl font-extrabold text-slate-900 dark:text-white">
+            Contribute Academic Material
+          </h1>
+          {isAdmin && (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-cyber-blue/10 border border-cyber-blue/25 px-3 py-1 text-xs font-bold text-cyber-blue">
+              <span className="h-1.5 w-1.5 rounded-full bg-cyber-blue animate-pulse" />
+              Admin Direct Publish
+            </span>
+          )}
+        </div>
         <p className="text-sm text-slate-600 dark:text-slate-400">
           Upload handwritten lecture notes, official syllabus outlines, or previous year question papers (PYQs) for AKTU engineering subjects.
         </p>
       </div>
+
+      {/* Role-Specific Notice Banner */}
+      {isAdmin ? (
+        <div className="p-4 rounded-2xl bg-cyber-blue/10 border border-cyber-blue/25 text-xs text-cyber-blue font-semibold flex items-center gap-2.5">
+          <span className="text-base">⚡</span>
+          <span>As an admin, your upload will be automatically approved and instantly visible.</span>
+        </div>
+      ) : (
+        <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/25 text-xs text-amber-600 dark:text-amber-400 font-semibold flex items-center gap-2.5">
+          <span className="text-base">ℹ️</span>
+          <span>Your upload will be reviewed by admin before going live.</span>
+        </div>
+      )}
 
       {/* Upload Form Card */}
       <div className="glass-panel p-8 rounded-3xl relative overflow-hidden bg-white/80 dark:bg-[#090d16] border border-slate-200 dark:border-white/10 shadow-2xl">
@@ -325,7 +363,7 @@ function UploadFormContent() {
                     <span>Click to browse or drop your PDF document here</span>
                   )}
                 </div>
-                <span className="text-[10px] text-slate-500">Supported format: PDF only (Max size: 25MB)</span>
+                <span className="text-[10px] text-slate-500">Supported format: PDF only (Max size: 10MB)</span>
               </label>
             </div>
           </div>
@@ -345,7 +383,7 @@ function UploadFormContent() {
                 <span>Uploading Resource...</span>
               </>
             ) : (
-              <span>Submit Resource for Moderation 🚀</span>
+              <span>{isAdmin ? "Publish Resource Instantly 🚀" : "Submit Resource for Moderation 🚀"}</span>
             )}
           </button>
 

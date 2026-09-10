@@ -3,6 +3,9 @@
 import { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useAuth } from "@/context/AuthContext";
+import { createClient } from "@/lib/supabase/client";
 
 const ReportModal = dynamic(() => import("./ReportModal"), { ssr: false });
 
@@ -11,6 +14,7 @@ interface Resource {
   title: string;
   type: string;
   fileUrl: string;
+  filePath?: string;
   downloads: number;
 }
 
@@ -35,32 +39,109 @@ interface SubjectViewProps {
 }
 
 export default function SubjectView({ subject, semesterCode }: SubjectViewProps) {
+  const router = useRouter();
+  const { user, isLoggedIn } = useAuth();
+  const [supabase] = useState(() => createClient());
   const [activeUnitNum, setActiveUnitNum] = useState(1);
   const [isBookmarked, setIsBookmarked] = useState(false);
+  const [unitsData, setUnitsData] = useState<Unit[]>(subject.units);
+  const [loadingViewId, setLoadingViewId] = useState<string | null>(null);
   
   // Report Modal states
   const [isReportOpen, setIsReportOpen] = useState(false);
   const [selectedResourceId, setSelectedResourceId] = useState("");
   const [selectedResourceTitle, setSelectedResourceTitle] = useState("");
 
-  const activeUnit = subject.units.find((u) => u.number === activeUnitNum) || subject.units[0];
+  // Load and merge Supabase approved resources for this subject
+  useEffect(() => {
+    let isCancelled = false;
+
+    async function loadApprovedResources() {
+      try {
+        const { data: dbResources, error } = await supabase
+          .from("resources")
+          .select("id, title, type, file_url, file_path, downloads, unit_number")
+          .eq("subject_slug", subject.slug)
+          .eq("status", "APPROVED");
+
+        if (!error && dbResources && !isCancelled) {
+          setUnitsData(
+            subject.units.map((unit) => {
+              const matchedDbResources: Resource[] = dbResources
+                .filter((r) => (r.unit_number || 1) === unit.number)
+                .map((r) => ({
+                  id: r.id,
+                  title: r.title,
+                  type: r.type,
+                  fileUrl: r.file_url || "",
+                  filePath: r.file_path || "",
+                  downloads: r.downloads || 0,
+                }));
+
+              // Deduplicate and combine static resources with DB resources
+              const existingIds = new Set(unit.resources.map((r) => r.id));
+              const newResources = matchedDbResources.filter((r) => !existingIds.has(r.id));
+
+              return {
+                ...unit,
+                resources: [...unit.resources, ...newResources],
+              };
+            })
+          );
+        }
+      } catch (err) {
+        console.error("Failed to load subject resources:", err);
+      }
+    }
+
+    loadApprovedResources();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [subject.slug, subject.units, supabase]);
+
+  const activeUnit = unitsData.find((u) => u.number === activeUnitNum) || unitsData[0];
 
   // Initialize bookmark state
   useEffect(() => {
-    const stored = localStorage.getItem("studenthub_bookmarks");
-    if (stored) {
-      try {
-        const bookmarks = JSON.parse(stored);
-        const hasBookmark = bookmarks.some((b: any) => b.id === `${subject.code}`);
-        setIsBookmarked(hasBookmark);
-      } catch (err) {
-        console.error(err);
+    if (isLoggedIn && user?.id) {
+      supabase
+        .from("bookmarks")
+        .select("id")
+        .eq("user_id", user.id)
+        .then(({ data }) => {
+          const hasBookmark = data && data.length > 0;
+          if (hasBookmark) {
+            setIsBookmarked(true);
+          } else {
+            const stored = localStorage.getItem("studenthub_bookmarks");
+            if (stored) {
+              try {
+                const bookmarks = JSON.parse(stored);
+                setIsBookmarked(bookmarks.some((b: any) => b.id === `${subject.code}`));
+              } catch (err) {
+                console.error(err);
+              }
+            }
+          }
+        });
+    } else {
+      const stored = localStorage.getItem("studenthub_bookmarks");
+      if (stored) {
+        try {
+          const bookmarks = JSON.parse(stored);
+          const hasBookmark = bookmarks.some((b: any) => b.id === `${subject.code}`);
+          setIsBookmarked(hasBookmark);
+        } catch (err) {
+          console.error(err);
+        }
       }
     }
-  }, [subject.code]);
+  }, [subject.code, isLoggedIn, user?.id, supabase]);
 
   // Toggle bookmark action
-  const toggleBookmark = () => {
+  const toggleBookmark = async () => {
     const stored = localStorage.getItem("studenthub_bookmarks");
     let bookmarks = [];
     if (stored) {
@@ -71,7 +152,10 @@ export default function SubjectView({ subject, semesterCode }: SubjectViewProps)
       }
     }
 
-    if (isBookmarked) {
+    const nextState = !isBookmarked;
+    setIsBookmarked(nextState);
+
+    if (!nextState) {
       bookmarks = bookmarks.filter((b: any) => b.id !== `${subject.code}`);
     } else {
       bookmarks.push({
@@ -83,12 +167,58 @@ export default function SubjectView({ subject, semesterCode }: SubjectViewProps)
     }
 
     localStorage.setItem("studenthub_bookmarks", JSON.stringify(bookmarks));
-    setIsBookmarked(!isBookmarked);
   };
 
-  // Track downloads / views
-  const handleDownload = (resId: string, title: string) => {
+  // Track downloads / views and increment in Supabase
+  const handleDownload = async (resId: string, title: string) => {
     console.log(`[Analytics Event] Resource Opened: "${title}" (ID: ${resId})`);
+    
+    // Update local count UI
+    setUnitsData((prevUnits) =>
+      prevUnits.map((u) => ({
+        ...u,
+        resources: u.resources.map((r) =>
+          r.id === resId ? { ...r, downloads: r.downloads + 1 } : r
+        ),
+      }))
+    );
+
+    // Call download count API endpoint
+    try {
+      fetch(`/api/resources/${resId}/download`, { method: "POST" }).catch(() => {});
+    } catch {
+      // Non-blocking analytics
+    }
+  };
+
+  // Handle viewing resource in in-browser PDF viewer
+  const handleViewResource = async (res: Resource) => {
+    setLoadingViewId(res.id);
+    try {
+      let targetUrl = res.fileUrl;
+
+      if (res.filePath) {
+        const { data, error } = await supabase.storage
+          .from("resources")
+          .createSignedUrl(res.filePath, 3600);
+        if (!error && data?.signedUrl) {
+          targetUrl = data.signedUrl;
+        }
+      }
+
+      if (targetUrl && targetUrl !== "#") {
+        handleDownload(res.id, res.title);
+        router.push(
+          `/notes/view?url=${encodeURIComponent(targetUrl)}&title=${encodeURIComponent(
+            res.title
+          )}&resourceId=${encodeURIComponent(res.id)}`
+        );
+      }
+    } catch (err) {
+      console.error("Failed to prepare resource view:", err);
+    } finally {
+      setLoadingViewId(null);
+    }
   };
 
   const triggerReport = (resId: string, title: string) => {
@@ -137,7 +267,7 @@ export default function SubjectView({ subject, semesterCode }: SubjectViewProps)
         
         {/* Left Side: Unit Tab Buttons */}
         <div className="lg:col-span-1 flex lg:flex-col gap-2 overflow-x-auto lg:overflow-x-visible pb-2 lg:pb-0">
-          {subject.units.map((unit) => (
+          {unitsData.map((unit) => (
             <button
               key={unit.number}
               onClick={() => setActiveUnitNum(unit.number)}
@@ -229,16 +359,28 @@ export default function SubjectView({ subject, semesterCode }: SubjectViewProps)
                         </svg>
                       </button>
 
-                      {/* Open/Download button */}
-                      <a
-                        href={res.fileUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={() => handleDownload(res.id, res.title)}
-                        className="inline-flex items-center justify-center rounded-lg bg-cyber-blue/10 border border-cyber-blue/20 hover:bg-cyber-blue hover:text-white px-3.5 py-1.5 text-xs font-semibold text-cyber-blue transition-all"
-                      >
-                        Open PDF
-                      </a>
+                      {/* View Button or Coming Soon Badge */}
+                      {(res.fileUrl && res.fileUrl !== "#") || res.filePath ? (
+                        <button
+                          type="button"
+                          onClick={() => handleViewResource(res)}
+                          disabled={loadingViewId === res.id}
+                          className="inline-flex items-center justify-center rounded-lg bg-cyber-blue/10 border border-cyber-blue/20 hover:bg-cyber-blue hover:text-white px-3.5 py-1.5 text-xs font-semibold text-cyber-blue transition-all disabled:opacity-50"
+                        >
+                          {loadingViewId === res.id ? (
+                            <span className="flex items-center gap-1.5">
+                              <span className="h-3 w-3 border-2 border-cyber-blue border-t-transparent rounded-full animate-spin" />
+                              <span>Opening...</span>
+                            </span>
+                          ) : (
+                            "View"
+                          )}
+                        </button>
+                      ) : (
+                        <span className="inline-flex items-center justify-center rounded-lg bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10 px-3 py-1.5 text-[11px] font-semibold text-slate-400 dark:text-slate-500">
+                          Coming Soon
+                        </span>
+                      )}
                     </div>
                   </div>
                 ))}

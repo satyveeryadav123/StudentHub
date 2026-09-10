@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useAuth } from "@/context/AuthContext";
+import { createClient } from "@/lib/supabase/client";
 
 interface Bookmark {
   id: string;
@@ -11,27 +13,70 @@ interface Bookmark {
 }
 
 export default function BookmarkedNotes() {
+  const { user, isLoggedIn } = useAuth();
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
   const [isMounted, setIsMounted] = useState(false);
+  const [supabase] = useState(() => createClient());
 
   useEffect(() => {
     setIsMounted(true);
-    const stored = localStorage.getItem("studenthub_bookmarks");
-    if (stored) {
-      try {
-        setBookmarks(JSON.parse(stored));
-      } catch (err) {
-        console.error("Failed to parse bookmarks:", err);
+
+    if (isLoggedIn && user?.id) {
+      // Load from Supabase bookmarks table
+      supabase
+        .from("bookmarks")
+        .select("id, resource_id, resources(id, title, type, subject_slug, unit_number, semester, file_url)")
+        .eq("user_id", user.id)
+        .then(({ data, error }) => {
+          if (!error && data && data.length > 0) {
+            const mapped = data.map((b: any) => {
+              const res = Array.isArray(b.resources) ? b.resources[0] : b.resources;
+              return {
+                id: b.id,
+                title: res?.title || "Resource Note",
+                subjectName: res?.subject_slug || "Subject",
+                url: res?.file_url || (res?.subject_slug ? `/notes/sem-${res.semester || 1}/${res.subject_slug}` : "/notes"),
+              };
+            });
+            setBookmarks(mapped);
+          } else {
+            const stored = localStorage.getItem("studenthub_bookmarks");
+            if (stored) {
+              try {
+                setBookmarks(JSON.parse(stored));
+              } catch (err) {
+                console.error("Failed to parse bookmarks:", err);
+              }
+            }
+          }
+        });
+    } else {
+      // Load from localStorage
+      const stored = localStorage.getItem("studenthub_bookmarks");
+      if (stored) {
+        try {
+          setBookmarks(JSON.parse(stored));
+        } catch (err) {
+          console.error("Failed to parse bookmarks:", err);
+        }
       }
     }
-  }, []);
+  }, [isLoggedIn, user?.id, supabase]);
 
-  const removeBookmark = (id: string, e: React.MouseEvent) => {
+  const removeBookmark = async (id: string, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     const updated = bookmarks.filter((b) => b.id !== id);
     setBookmarks(updated);
     localStorage.setItem("studenthub_bookmarks", JSON.stringify(updated));
+
+    if (isLoggedIn && user?.id) {
+      try {
+        await supabase.from("bookmarks").delete().eq("id", id);
+      } catch (err) {
+        console.error("Failed to delete bookmark:", err);
+      }
+    }
   };
 
   // Prevent hydration mismatch (don't render on server)

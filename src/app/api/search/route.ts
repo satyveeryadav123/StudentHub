@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
 import { SUBJECT_DATA } from "@/lib/subjects";
+import { createClient } from "@/lib/supabase/server";
 
 export interface SearchResultItem {
-  name: string;
-  code: string;
-  semester: string;
-  url: string;
+  id: string;
+  title: string;
   type: string;
-  category: "Notes" | "PYQ";
+  semester: number | string;
+  href: string;
+  source: "database" | "static";
 }
 
 export async function GET(request: Request) {
@@ -16,67 +17,82 @@ export async function GET(request: Request) {
     const rawQuery = searchParams.get("q") || "";
     const query = rawQuery.trim().toLowerCase();
 
-    if (!query) {
-      return NextResponse.json([]);
+    if (!query || query.length < 2) {
+      return NextResponse.json({ results: [] });
     }
 
-    // Clean query without hyphens/spaces for code matching (e.g., "bcc-301" -> "bcc301")
+    const dbMapped: SearchResultItem[] = [];
+
+    // SOURCE 1 — Supabase database (real uploaded resources)
+    try {
+      const supabase = await createClient();
+      const { data: dbResults, error: dbError } = await supabase
+        .from("resources")
+        .select("id, title, type, semester, subject_slug, status")
+        .eq("status", "APPROVED")
+        .ilike("title", `%${query}%`)
+        .limit(5);
+
+      if (!dbError && dbResults) {
+        for (const resource of dbResults) {
+          const semNum = resource.semester || 1;
+          const slug = resource.subject_slug || "notes";
+          dbMapped.push({
+            id: resource.id,
+            title: resource.title,
+            type: resource.type,
+            semester: semNum,
+            href: `/notes/sem-${semNum}/${slug}`,
+            source: "database",
+          });
+        }
+      }
+    } catch (dbErr) {
+      console.error("Supabase search error:", dbErr);
+    }
+
+    // SOURCE 2 — Static subjects from src/lib/subjects.ts
+    const staticResults: SearchResultItem[] = [];
     const cleanQuery = query.replace(/[\s-]/g, "");
-    const isPyqSearch = query.includes("pyq") || query.includes("paper") || query.includes("question") || query.includes("exam");
 
-    // Analytics Log
-    console.log(`[Analytics Event] Search Query: "${query}" at ${new Date().toISOString()}`);
-
-    const results: SearchResultItem[] = [];
-
-    // Search across all 8 semesters in shared SUBJECT_DATA
     for (const [semKey, semObj] of Object.entries(SUBJECT_DATA)) {
+      const semesterNum = parseInt(semKey.replace("sem-", ""), 10) || 1;
       for (const subject of semObj.subjects) {
-        const nameLower = subject.name.toLowerCase();
-        const codeLower = subject.code.toLowerCase();
-        const cleanCodeLower = codeLower.replace(/[\s-]/g, "");
-        const descLower = subject.desc.toLowerCase();
-        const semTitleLower = semObj.title.toLowerCase();
+        const nameMatch = subject.name.toLowerCase().includes(query);
+        const codeMatch = subject.code.toLowerCase().includes(query);
+        const cleanCodeMatch = subject.code.toLowerCase().replace(/[\s-]/g, "").includes(cleanQuery);
+        const slugMatch = subject.slug.toLowerCase().includes(query);
 
-        // Match on name, raw code, cleaned code, description, or semester title
-        const isMatch =
-          nameLower.includes(query) ||
-          codeLower.includes(query) ||
-          cleanCodeLower.includes(cleanQuery) ||
-          descLower.includes(query) ||
-          semTitleLower.includes(query) ||
-          isPyqSearch;
-
-        if (isMatch) {
-          // Add Notes Link
-          if (!isPyqSearch || results.length < 5) {
-            results.push({
-              name: subject.name,
-              code: subject.code,
-              semester: semObj.title,
-              url: `/notes/${semKey}/${subject.slug}`,
-              type: subject.type,
-              category: "Notes",
-            });
-          }
-
-          // Add PYQ Link
-          results.push({
-            name: `${subject.name} (PYQs)`,
-            code: subject.code,
-            semester: semObj.title,
-            url: `/pyq/${semKey}/${subject.slug}`,
-            type: subject.type,
-            category: "PYQ",
+        if (nameMatch || codeMatch || cleanCodeMatch || slugMatch) {
+          staticResults.push({
+            id: subject.slug,
+            title: subject.name,
+            type: "SUBJECT",
+            semester: semesterNum,
+            href: `/notes/sem-${semesterNum}/${subject.slug}`,
+            source: "static",
           });
         }
       }
     }
 
-    // Deduplicate and return top 10 matching results
-    return NextResponse.json(results.slice(0, 10));
+    // Combine both arrays, remove duplicates, return max 8 results
+    const combined = [...dbMapped, ...staticResults];
+    const seenHrefs = new Set<string>();
+    const results: SearchResultItem[] = [];
+
+    for (const item of combined) {
+      const key = `${item.id}-${item.href}`;
+      if (!seenHrefs.has(key)) {
+        seenHrefs.add(key);
+        results.push(item);
+      }
+      if (results.length >= 8) break;
+    }
+
+    return NextResponse.json({ results });
   } catch (error) {
     console.error("Search API Error:", error);
-    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+    return NextResponse.json({ results: [], error: "Internal Server Error" }, { status: 500 });
   }
 }
